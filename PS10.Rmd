@@ -14,26 +14,19 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=4.5, message=FALSE, warning = FALSE)
+library(tidyverse)
+library(broom)
+library(glmnet)
 ```
 
-
-
-# Collaboration
-
-Please indicate who you collaborated with on this assignment: 
 
 
 
 # Setup
 
-```{r}
-library(tidyverse)
-library(broom)
-library(glmnet)
-
+```{r, warning = FALSE, message = FALSE}
 train <- read_csv("data/train.csv")
 test <- read_csv("data/test.csv")
-sample_submission <- read_csv("data/sample_submission.csv")
 
 # Only use 150 observations to train model!
 set.seed(76)
@@ -43,7 +36,7 @@ train <- train %>%
 
 # Need "dummy" outcome variable to make model.matrix() code below work
 test <- test %>% 
-  mutate(log_price_doc=1) 
+  mutate(log_price_doc = 1) 
 
 # Model formula
 model_formula <- as.formula("log_price_doc ~ full_sq + area_m + raion_popul + green_zone_part + indust_part + children_preschool + preschool_education_centers_raion + children_school + school_education_centers_raion + school_education_centers_top_20_raion + healthcare_centers_raion + university_top_20_raion + sport_objects_raion + additional_education_raion + culture_objects_top_25 + culture_objects_top_25_raion + shopping_centers_raion + office_raion + thermal_power_plant_raion + incineration_raion + oil_chemistry_raion + radiation_raion + railroad_terminal_raion + big_market_raion + nuclear_reactor_raion + detention_facility_raion + full_all + male_f + female_f + young_all + young_male + young_female + work_all + work_male + work_female + ekder_all + ekder_male + ekder_female + ID_metro + metro_min_avto + metro_km_avto + kindergarten_km + school_km + park_km + green_zone_km + industrial_km + water_treatment_km + cemetery_km + incineration_km + railroad_station_avto_km + railroad_station_avto_min + ID_railroad_station_avto + public_transport_station_km + public_transport_station_min_walk + water_km + water_1line + mkad_km + ttk_km + sadovoe_km + bulvar_ring_km + kremlin_km + big_road1_km + ID_big_road1 + big_road1_1line + big_road2_km + ID_big_road2 + railroad_km + railroad_1line + zd_vokzaly_avto_km + ID_railroad_terminal + bus_terminal_avto_km + ID_bus_terminal + oil_chemistry_km + nuclear_reactor_km + radiation_km + power_transmission_line_km + thermal_power_plant_km + ts_km + big_market_km + market_shop_km + fitness_km + swim_pool_km + ice_rink_km + stadium_km + basketball_km + hospice_morgue_km + detention_facility_km + public_healthcare_km + university_km + workplaces_km + shopping_centers_km + office_km + additional_education_km + preschool_km + big_church_km + church_synagogue_km + mosque_km + theater_km + museum_km + exhibition_km + catering_km + green_part_500 + prom_part_500 + office_count_500 + office_sqm_500 + trc_count_500 + trc_sqm_500") 
@@ -54,14 +47,84 @@ predictor_matrix_test <- model.matrix(model_formula, data = test)[, -1]
 ```
 
 
-# Do work and create submission files:
+# LASSO crossvalidated model
+
+Run crossvalidated LASSO model and obtain optimal lambdas. 
 
 ```{r}
+lambda_inputs <- 10^seq(-2, 10, length = 100)
 
+LASSO_CV <- cv.glmnet(x = predictor_matrix_train, y = train$log_price_doc, alpha=1, lambda = lambda_inputs)
+
+# Optimal lambdas
+lambda_star <- LASSO_CV$lambda.min
+lambda_star_1SE <- LASSO_CV$lambda.1se
+
+# Plot CV
+plot(LASSO_CV)
+abline(v = log(lambda_star), col = "red")
+abline(v = log(lambda_star_1SE), col = "blue")
+```
+
+I'll use $lambda\_star\_1SE$ to build my final model and predict outcomes on the test set. First, let's see how this model performs on the training set.
+
+```{r, echo = FALSE}
+mse_lasso <- LASSO_CV$cvm[LASSO_CV$lambda == lambda_star_1SE]
+paste("MSE_LASSO = ", round(mse_lasso, 4), sep = "")
+```
+
+Use model with $lambda\_star\_1SE$ to make predictions and then look at distribution of predicted values.
+
+```{r}
+y_hat_LASSO <- predict(LASSO_CV, newx = predictor_matrix_test, s = lambda_star_1SE) %>% 
+  as.vector()
+y_hat_LASSO <- exp(y_hat_LASSO)
+hist(y_hat_LASSO)
 ```
 
 
+Write to .csv file
 
+```{r}
+submission_LASSO <- cbind(test$id, y_hat_LASSO)
+submission_LASSO <- as.data.frame(submission_LASSO)
+names(submission_LASSO) <- c("id", "price_doc")
+# set any negative predictions to 0
+submission_LASSO$price_doc[submission_LASSO$price_doc < 0] <- 0
+write.csv(submission_LASSO, file = "submission_LASSO.csv", row.names = FALSE)
+```
+
+# Linear model
+
+Build model and calculate MSE for the training set.
+
+```{r}
+lm_model <- lm(train$log_price_doc ~ predictor_matrix_train)
+```
+
+```{r, echo = FALSE}
+mse_lm <- mean(summary(lm_model)$residuals^2)
+paste("MSE_lm = ", round(mse_lm, 4), sep = "")
+```
+
+
+View distribution of predicted outcomes. 
+
+```{r, warning = FALSE, message = FALSE}
+y_hat_lm <- predict(lm_model, test) %>% 
+  as.vector()
+y_hat_lm <- exp(y_hat_lm)
+hist(y_hat_lm)
+```
+
+Write to a .csv file.
+
+```{r}
+submission_lm <- cbind(test$id, y_hat_lm)
+submission_lm <- as.data.frame(submission_lm)
+names(submission_lm) <- c("id", "price_doc")
+write.csv(submission_lm, file = "submission_lm.csv", row.names = FALSE)
+```
 
 
 # Scoreboard
@@ -72,5 +135,5 @@ in these cells:
 
 Method                | Training Score  | Kaggle Score
 --------------------- | -------------   | -------------
-lm                    |                 |  
-LASSO crossvalidated  |                 |  
+lm                    |  0.0642     |  0.79051
+LASSO crossvalidated  |  0.3443       |  0.45162
