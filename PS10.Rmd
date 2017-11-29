@@ -17,6 +17,7 @@ knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=4.5, message=FALSE, w
 library(tidyverse)
 library(broom)
 library(glmnet)
+library(MLmetrics)
 ```
 
 
@@ -69,8 +70,10 @@ abline(v = log(lambda_star_1SE), col = "blue")
 I'll use $lambda\_star\_1SE$ to build my final model and predict outcomes on the test set. First, let's see how this model performs on the training set.
 
 ```{r, echo = FALSE}
-mse_lasso <- LASSO_CV$cvm[LASSO_CV$lambda == lambda_star_1SE]
-paste("MSE_LASSO = ", round(mse_lasso, 4), sep = "")
+y_pred <- exp(predict(LASSO_CV, newx = predictor_matrix_train, s = lambda_star_1SE))
+y_true <- train$price_doc
+rmsle_lasso <- RMSLE(y_pred, y_true)
+paste("RMSLE_LASSO = ", round(rmsle_lasso, 4), sep = "")
 ```
 
 Use model with $lambda\_star\_1SE$ to make predictions and then look at distribution of predicted values.
@@ -99,19 +102,21 @@ write.csv(submission_LASSO, file = "submission_LASSO.csv", row.names = FALSE)
 Build model and calculate MSE for the training set.
 
 ```{r}
-lm_model <- lm(train$log_price_doc ~ predictor_matrix_train)
+lm_model <- lm(model_formula, data = train)
 ```
 
 ```{r, echo = FALSE}
-mse_lm <- mean(summary(lm_model)$residuals^2)
-paste("MSE_lm = ", round(mse_lm, 4), sep = "")
+y_pred <- exp(predict(lm_model, data = train))
+y_true <- train$price_doc
+rmsle_lm <- RMSLE(y_pred, y_true)
+paste("RMSLE_lm = ", round(rmsle_lm, 4), sep = "")
 ```
 
 
 View distribution of predicted outcomes. 
 
 ```{r, warning = FALSE, message = FALSE}
-y_hat_lm <- predict(lm_model, test) %>% 
+y_hat_lm <- predict(lm_model, newdata = test) %>% 
   as.vector()
 y_hat_lm <- exp(y_hat_lm)
 hist(y_hat_lm)
@@ -135,5 +140,5 @@ in these cells:
 
 Method                | Training Score  | Kaggle Score
 --------------------- | -------------   | -------------
-lm                    |  0.0642     |  0.79051
-LASSO crossvalidated  |  0.3443       |  0.45162
+lm                    |  0.2535         |  2.63413
+LASSO crossvalidated  |  0.5416         |  0.45162
